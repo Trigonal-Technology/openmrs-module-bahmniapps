@@ -68,6 +68,13 @@ angular.module('bahmni.home')
                             $scope.locales.push(localeLanguage);
                         }
                     });
+                    // Add Arabic for RTL testing if not already present
+                    var hasArabic = _.find($scope.locales, function (locale) {
+                        return locale.code === 'ar' || locale.code.startsWith('ar_') || locale.code.startsWith('ar-');
+                    });
+                    if (!hasArabic) {
+                        $scope.locales.push({"code": "ar", "nativeName": "العربية"});
+                    }
                     $scope.selectedLocale = $translate.use() ? $translate.use() : $scope.locales[0].code;
                 });
             });

@@ -100,11 +100,16 @@ module.exports = function (grunt) {
                         src: [
                             '.tmp',
                             '<%= yeoman.app %>/styles/*.css',
+                            '!<%= yeoman.app %>/styles/*.rtl.css',
                             '<%= yeoman.dist %>/*',
-                            '!<%= yeoman.dist %>/.git*'
+                            '!<%= yeoman.dist %>/.git*',
+                            '!<%= yeoman.dist %>/components'
                         ]
                     }
-                ]
+                ],
+                options: {
+                    force: true
+                }
             },
             coverage: [
                 'coverage'
@@ -215,7 +220,7 @@ module.exports = function (grunt) {
                 '<%= yeoman.app %>/document-upload/**/*.html',
                 '<%= yeoman.app %>/reports/**/*.html'
             ],
-            css: '<%= yeoman.app %>/styles/**/*.css',
+            css: ['<%= yeoman.app %>/styles/**/*.css', '!<%= yeoman.app %>/styles/**/*.rtl.css'],
             options: {
                 dest: '<%= yeoman.dist %>',
                 flow: {
@@ -237,7 +242,7 @@ module.exports = function (grunt) {
                 '<%= yeoman.dist %>/clinical/dashboard/views/dashboardPrint.html',
                 '<%= yeoman.dist %>/common/displaycontrols/prescription/views/prescription.html'
             ],
-            css: '<%= yeoman.dist %>/styles/**/*.css',
+            css: ['<%= yeoman.dist %>/styles/**/*.css', '!<%= yeoman.dist %>/styles/**/*.rtl.css'],
             options: {
                 assetsDirs: ['<%= yeoman.dist %>', '<%= yeoman.dist %>/images']
             }
@@ -256,14 +261,20 @@ module.exports = function (grunt) {
         },
         cssmin: {
             options: {
-                banner: '/* Bahmni OPD minified CSS file */'
+                banner: '/* Bahmni OPD minified CSS file */',
+                keepSpecialComments: 0
             },
             minify: {
                 expand: true,
                 cwd: '<%= yeoman.dist %>/styles/css/',
-                src: ['**/*.css', '!**/*.min.*.css'],
+                src: ['**/*.css', '!**/*.min.*.css', '!**/*.rtl.css'],
                 dest: '<%= yeoman.dist %>/styles/css/',
                 ext: '.min.*.css'
+            },
+            generated: {
+                options: {
+                    keepSpecialComments: 0
+                }
             }
         },
         htmlmin: {
@@ -310,6 +321,7 @@ module.exports = function (grunt) {
                             '.htaccess',
                             'images/**/*.{gif,webp}',
                             'styles/**/*.css',
+                            'styles/**/*.rtl.css',
                             'styles/fonts/**/*',
                             'clinical/config/*.json',
                             'i18n/**/*.json',
@@ -588,6 +600,8 @@ module.exports = function (grunt) {
         'copy:nodeModules',
         'clean:dist',
         'compass:dist',
+        'rtlcss',
+        'injectRtlUtil',
         'useminPrepare',
         'ngAnnotate',
         'concat',
@@ -621,5 +635,76 @@ module.exports = function (grunt) {
             console.log(stdout);
             cb(!err);
         });
+    });
+
+    grunt.registerTask('rtlcss', 'Generate RTL CSS files', function () {
+        var rtlcss = require('rtlcss');
+        var path = require('path');
+        var done = this.async();
+        var stylesDir = path.join(yeomanConfig.app, 'styles');
+
+        // Use grunt.file to find CSS files
+        var files = grunt.file.expand({
+            cwd: stylesDir,
+            filter: 'isFile'
+        }, ['**/*.css', '!**/*.rtl.css']);
+
+        if (files.length === 0) {
+            grunt.log.writeln('No CSS files found to process for RTL');
+            return done(true);
+        }
+
+        var processed = 0;
+        files.forEach(function (file) {
+            var cssPath = path.join(stylesDir, file);
+            var rtlPath = cssPath.replace(/\.css$/, '.rtl.css');
+
+            try {
+                var css = grunt.file.read(cssPath);
+                var rtlCss = rtlcss.process(css);
+                grunt.file.write(rtlPath, rtlCss);
+                processed++;
+                grunt.log.writeln('Generated: ' + path.relative(stylesDir, rtlPath));
+            } catch (e) {
+                grunt.log.error('Error processing ' + file + ': ' + e.message);
+            }
+        });
+
+        grunt.log.writeln('Processed ' + processed + ' of ' + files.length + ' CSS files for RTL');
+        grunt.log.writeln('RTL CSS files will be copied to dist/ during copy:dist task');
+        done(true);
+    });
+
+    grunt.registerTask('injectRtlUtil', 'Inject rtlUtil.js into all index.html files', function () {
+        var path = require('path');
+        var rtlUtilScript = '<script src="../common/util/rtlUtil.js"></script>\n';
+        var bahmniTranslatePattern = /(<script[^>]*src=["'][^"']*bahmni-translate\.js["'][^>]*>)/i;
+        var rtlUtilPattern = /rtlUtil\.js/i;
+
+        var indexFiles = grunt.file.expand({
+            cwd: yeomanConfig.app,
+            filter: 'isFile'
+        }, ['**/index.html']);
+
+        var processed = 0;
+        indexFiles.forEach(function (file) {
+            var filePath = path.join(yeomanConfig.app, file);
+            var content = grunt.file.read(filePath);
+
+            // Check if bahmni-translate.js exists but rtlUtil.js doesn't before it
+            if (bahmniTranslatePattern.test(content) && !rtlUtilPattern.test(content)) {
+                // Inject rtlUtil.js right before bahmni-translate.js
+                content = content.replace(bahmniTranslatePattern, rtlUtilScript + '        $1');
+                grunt.file.write(filePath, content);
+                processed++;
+                grunt.log.writeln('Injected rtlUtil.js into: ' + file);
+            } else if (rtlUtilPattern.test(content)) {
+                grunt.log.writeln('rtlUtil.js already exists in: ' + file);
+            } else {
+                grunt.log.writeln('bahmni-translate.js not found in: ' + file);
+            }
+        });
+
+        grunt.log.writeln('Processed ' + processed + ' of ' + indexFiles.length + ' index.html files');
     });
 };
